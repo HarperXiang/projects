@@ -1,0 +1,560 @@
+---
+title: "GARCH"
+date: "2020/6/6"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+library(quantmod)
+suppressWarnings(library(Metrics))
+suppressWarnings(library(forecast))
+suppressWarnings(library(tseries))
+suppressWarnings(library(hts))
+suppressWarnings(library(stringr))
+suppressWarnings(library(xts))
+suppressWarnings(library(imputeTS))
+suppressWarnings(library(dplyr))
+library(fGarch)
+library(zoo)
+library(FinTS)
+library(prophet)
+Sys.setlocale(category = "LC_ALL", locale = "english")
+library(rugarch)
+
+```
+
+```{r }
+suppressWarnings(getSymbols("NWSA",from="2015-1-1",to="2020-6-5"))
+suppressWarnings(getSymbols("DIS",from="2015-1-1",to="2020-6-5"))
+suppressWarnings(getSymbols("NFLX",from="2015-1-1",to="2020-6-5"))
+suppressWarnings(getSymbols("GOOGL",from="2015-1-1",to="2020-6-5"))
+suppressWarnings(getSymbols("T",from="2015-1-1",to="2020-6-5"))
+head(GOOGL)
+```
+
+```{r }
+GOOGL <- data.frame(GOOGL)
+GOOGL$date <- row.names(GOOGL)
+GOOGL.train <- GOOGL[GOOGL$date>='2015-01-02' & GOOGL$date<='2020-01-02','GOOGL.Close']
+GOOGL.train.date <- GOOGL[GOOGL$date>='2015-01-02' & GOOGL$date<='2020-01-02','date']
+GOOGL.test <- GOOGL[GOOGL$date>='2020-01-03' & GOOGL$date<='2020-01-31','GOOGL.Close']
+GOOGL.test.date <- GOOGL[GOOGL$date>='2020-01-03' & GOOGL$date<='2020-01-31','date']
+GOOGL.train.LastPrice <- GOOGL[GOOGL$date=='2020-01-02','GOOGL.Close']
+h <- length(GOOGL.test)#20
+plot(as.Date(GOOGL.train.date),GOOGL.train, type = "l",xlab='Time', ylab='GOOGL Stock Price')
+```
+
+
+```{r }
+n <- length(GOOGL.train);
+m <- length(c(GOOGL.train.LastPrice,GOOGL.test))
+GOOGL.train.lr <- log(GOOGL.train[-1]/GOOGL.train[-n])
+GOOGL.test.lr <- log(c(GOOGL.train.LastPrice,GOOGL.test)[-1]/c(GOOGL.train.LastPrice,GOOGL.test)[-m])
+plot(as.Date(GOOGL.train.date[-1]),GOOGL.train.lr, type = "l", xlab='Time', ylab='GOOGL Log Return')
+#GOOGL.train.lr[1:20]
+length(GOOGL.test.lr) #20
+
+```
+
+
+
+```{r}
+#Test
+plot(as.Date(GOOGL.train.date[(n-500):n]),GOOGL.train.lr[(n-501):(n-1)], type = "l", xlab='Time', ylab='GOOGL Log Return', main="GOOGL Log Returns")
+
+```
+
+```{r}
+par(mfrow=c(2,1))
+plot(as.Date(GOOGL.train.date),GOOGL.train, type = "l",xlab='Time', ylab='GOOGL Stock Price')
+plot(as.Date(GOOGL.train.date[-1]),GOOGL.train.lr, type = "l", xlab='Time', ylab='GOOGL Log Return')
+
+```
+
+
+
+```{r }
+#Histogram
+hist(GOOGL.train.lr, xlab="Daily log return of stock prices", prob=TRUE, ylim=c(0,30), main="Histogram for daily return of stock prices")
+xfit<-seq(min(GOOGL.train.lr),max(GOOGL.train.lr),length=40)
+yfit<-dnorm(xfit,mean=mean(GOOGL.train.lr),sd=sd(GOOGL.train.lr))
+lines(xfit, yfit, col="blue", lwd=2)
+```
+
+
+```{r }
+#QQ-plot
+qqnorm(GOOGL.train.lr)
+qqline(GOOGL.train.lr, col = 2) 
+```
+
+As seen from the histogram and the QQ-plot, the series has a somewhat normal distribution with fat tails at both ends.
+
+```{r }
+kpss.test(GOOGL.train.lr) 
+```
+H0: Stationary. Fail to reject the null. So stationary.
+
+
+```{r }
+acf(GOOGL.train.lr)
+pacf(GOOGL.train.lr)
+```
+
+The ACF plot shows that since, the log stock price returns are not correlated, the mean is constant for the time series
+Box-Ljung test H0: = “Serial Correlations are Zero”.
+
+```{r }
+## Ljung Box Tests
+# y=GOOGL.train.lr-mean(GOOGL.train.lr)
+Box.test(GOOGL.train.lr,lag=12,type='Ljung')
+```
+
+There are autocorrelation.
+
+
+```{r }
+t.test(GOOGL.train.lr)
+```
+
+
+
+
+According to Box-Ljung test the zero correlations hypothesis is not rejected. This is not an indication of ARCH effect.
+
+```{r }
+acf(GOOGL.train.lr^2)
+pacf(GOOGL.train.lr^2)
+```
+
+PACF shows that the squared stock price return value is significant lag at lag 4. 
+
+
+```{r }
+arima1 <- auto.arima(GOOGL.train.lr,max.p = 5,max.q = 5,max.P = 5,max.Q = 5,max.d = 3,
+                      trace = FALSE,stepwise = FALSE,seasonal = FALSE,ic = 'aicc')
+arima1.res <- residuals(arima1)
+arima1
+```
+
+```{r }
+acf(arima1.res^2)
+pacf(arima1.res^2)
+```
+
+
+
+
+```{r }
+## Check residual
+Box.test(arima1.res,lag=12,type='Ljung')
+```
+White noise residual
+
+```{r }
+## ARCH test1
+# ArchTest(arima1.res - mean(arima1.res))
+ArchTest(arima1.res,1)
+```
+
+There exists no arch effect.
+
+```{r }
+#test
+
+```
+
+
+```{r }
+## ARCH test2
+y=arima1.res-mean(arima1.res)
+Box.test(arima1.res^2,lag=12,type='Ljung')
+```
+
+There exists no arch effect.
+
+```{r }
+acf(arima1.res^2)
+pacf(arima1.res^2)
+```
+
+
+Try Arch(1)
+
+```{r }
+arch1=garchFit(~arma(1,2) +garch(1,0),data=GOOGL.train.lr,trace=F) 
+summary(arch1)
+```
+
+```{r }
+# plot(arch1)
+```
+
+
+
+All the parameters are significant.
+
+The Jarquea Bera test is a goodness-of-fit test of whether sample data have the skewness and kurtosis matching a normal distribution. The null hypothesis for the test is that the data is normally distributed
+
+The Shapiroâ Wilk test is a test of normality. The null hypothesis for the test is that the data is normally distributed
+
+```{r }
+par(mfrow=c(3,1))
+resi=residuals(arch1,standardize=T)
+plot(resi,xlab='year',ylab='stand-resi',type='l')
+acf(resi,lag=20)
+pacf(resi^2,lag=20)
+```
+
+
+
+```{r }
+arch2=garchFit(~arma(1,2) +garch(1,0),data=GOOGL.train.lr,trace=F, cond.dist ='std') 
+# summary(arch2)
+```
+
+
+```{r }
+arch3=garchFit(~arma(1,2) +garch(1,0),data=GOOGL.train.lr,trace=F, cond.dist ='sstd') 
+summary(arch3)
+```
+
+GARCH
+
+```{r }
+garch1=garchFit(~arma(1,2)+garch(1,1),data=GOOGL.train.lr,trace=F)
+summary(garch1)
+```
+
+```{r }
+# plot(garch1)
+```
+
+
+```{r }
+garch2=garchFit(~arma(1,2)+garch(1,1),data=GOOGL.train.lr,trace=F, cond.dist ='std')
+summary(garch2)
+```
+
+```{r }
+par(mfcol=c(3, 1))
+garch2.resi=residuals(garch2, standardize=T)
+plot(garch2.resi, xlab="year" , ylab= "stand-resi" , type="l")
+acf(garch2.resi, lag=20)
+pacf(garch2.resi^2, lag=20)
+```
+
+```{r }
+# plot(garch2)
+```
+
+```{r }
+garch3=garchFit(~arma(1,2)+garch(1,1),data=GOOGL.train.lr,trace=F, cond.dist ='sstd')
+summary(garch3)
+```
+
+```{r }
+arch1.logPred <- predict(arch1, n.ahead = h, trace = FALSE, 
+        plot=TRUE, nx=NULL, crit_val=NULL, conf=NULL)
+```
+
+```{r }
+arch2.logPred <- predict(arch2, n.ahead = h, trace = FALSE, 
+        plot=TRUE, nx=NULL, crit_val=NULL, conf=NULL)
+```
+
+```{r }
+arch3.logPred <- predict(arch3, n.ahead = h, trace = FALSE, 
+        plot=TRUE, nx=NULL, crit_val=NULL, conf=NULL)
+```
+
+
+```{r }
+# garch2.logPred.roll=c()
+# dat <- GOOGL.train.lr
+# test <- GOOGL.test
+# for (i in 1:h){
+#     garch2=garchFit(~arma(1,2)+garch(1,1),data=dat,trace=F)
+#     garch2.logPred <- predict(garch2, n.ahead = 1, trace = FALSE, 
+#         plot=FALSE, nx=NULL, crit_val=NULL, conf=NULL)
+#     arch1.logPred.roll <- append(garch2.logPred.roll, garch2.logPred, after = length(garch2.logPred.roll)) 
+#     dat <- dat[-1]
+#     dat <- c(dat,garch2.logPred)
+#     
+# }
+```
+
+
+
+```{r }
+garch1.logPred <- predict(garch1, n.ahead = h, trace = FALSE, mse = 'cond',
+        plot=TRUE, nx=NULL, crit_val=NULL, conf=NULL)
+```
+
+
+```{r }
+garch2.logPred <- predict(garch2, n.ahead = h, trace = FALSE, 
+        plot=TRUE, nx=NULL, crit_val=NULL, conf=NULL)
+# garch2.logPred
+```
+
+```{r }
+garch3.logPred <- predict(garch3, n.ahead = h, trace = FALSE, 
+        plot=TRUE, nx=NULL, crit_val=NULL, conf=NULL)
+```
+
+
+```{r }
+# Function for changing log return into price
+Log2Price <- function(logData, initial_price) {
+  logr <- c(0,logData)
+  cuml_log= cumsum(logr)
+  reconstructed_price_norm=exp(cuml_log)
+  reconstructed_price = initial_price * reconstructed_price_norm
+  reconstructed_price=reconstructed_price[-1]
+  return(reconstructed_price)
+}
+```
+
+
+
+
+
+
+
+
+
+```{r }
+#Make predictions for Arch and Garch models
+arch1.Pred <- Log2Price(arch1.logPred$meanForecast,GOOGL.train.LastPrice)
+arch2.Pred <- Log2Price(arch2.logPred$meanForecast,GOOGL.train.LastPrice)
+arch3.Pred <- Log2Price(arch3.logPred$meanForecast,GOOGL.train.LastPrice)
+garch1.Pred <- Log2Price(garch1.logPred$meanForecast,GOOGL.train.LastPrice)
+garch2.Pred <- Log2Price(garch2.logPred$meanForecast,GOOGL.train.LastPrice)
+garch3.Pred <- Log2Price(garch3.logPred$meanForecast,GOOGL.train.LastPrice)
+```
+
+
+```{r }
+# Evaluations
+(arch1.smape <- suppressWarnings(smape(arch1.Pred,GOOGL.test)))
+(arch2.smape <- suppressWarnings(smape(arch2.Pred,GOOGL.test)))
+(arch3.smape <- suppressWarnings(smape(arch3.Pred,GOOGL.test)))
+(garch1.smape <- suppressWarnings(smape(garch1.Pred,GOOGL.test)))
+(garch2.smape <- suppressWarnings(smape(garch2.Pred,GOOGL.test)))
+(garch3.smape <- suppressWarnings(smape(garch3.Pred,GOOGL.test)))
+```
+
+```{r }
+#Test
+#summary(arch1) #AIC       BIC       SIC      HQIC 
+              #-5.633071 -5.608569 -5.633116 -5.623863 
+
+
+#summary(arch2) #AIC       BIC       SIC      HQIC 
+              #-5.809261 -5.780676 -5.809323 -5.798518 
+
+#summary(garch1) #AIC       BIC       SIC      HQIC 
+              #-5.661253 -5.632668 -5.661315 -5.650510 
+
+#summary(garch2) #AIC       BIC       SIC      HQIC 
+              #-5.863138 -5.830468 -5.863218 -5.850860 
+
+```
+
+```{r }
+# Log Evaluations
+(arch1.smape <- suppressWarnings(smape(arch1.logPred$meanForecast,GOOGL.test.lr)))
+(arch2.smape <- suppressWarnings(smape(arch2.logPred$meanForecast,GOOGL.test.lr)))
+(arch3.smape <- suppressWarnings(smape(arch3.logPred$meanForecast,GOOGL.test.lr)))
+(garch1.smape <- suppressWarnings(smape(garch1.logPred$meanForecast,GOOGL.test.lr)))
+(garch2.smape <- suppressWarnings(smape(garch2.logPred$meanForecast,GOOGL.test.lr)))
+(garch3.smape <- suppressWarnings(smape(garch3.logPred$meanForecast,GOOGL.test.lr)))
+
+```
+
+
+```{r }
+# Log Evaluations
+plot(GOOGL.test.lr,type = "l")
+plot(garch2.logPred$meanForecast,type = "l")
+#plot(garch2@h.t,type = "l")
+omega = garch1@fit$matcoef[1,1]
+alpha = garch1@fit$matcoef[2,1]
+beta = garch1@fit$matcoef[3,1]
+sigma2 = omega + alpha * GOOGL.train.lr[n-1]^2 + beta*garch1@h.t[n-1]
+sigma2
+GOOGL.test.lr[1]
+garch2.logPred$meanForecast
+```
+
+
+```{r }
+#Performance plot for Arch
+par(mfrow = c(1,1))
+plot(as.Date(GOOGL.test.date), GOOGL.test, type = "l", pch=20, col="black",
+     xlab="Date",ylab="Price", ylim=c(1300,1500),
+     main="Garch & Arch predictions")
+
+points(as.Date(GOOGL.test.date),arch2.Pred, pch=20, col="red")
+points(as.Date(GOOGL.test.date),garch2.Pred, pch=20, col="blue")
+
+legend("topleft", legend=c("Actual", "Arch","Garch"),
+       col=c("black", "red","blue"), lty=1:3, cex=0.8)
+```
+
+
+
+
+
+
+
+
+# STL
+
+```{r }
+plot(mstl(GOOGL.train))
+```
+
+```{r }
+#  "N"=none, "A"=additive, "M"=multiplicative and "Z"=automatically selected
+ets1 <- ets(GOOGL.train,model = "ZZZ")
+ets1
+```
+
+```{r }
+ets1.pred <- forecast(ets1, h = h)
+plot(ets1.pred)
+```
+
+
+```{r }
+# Evaluation
+ets1.smape <- suppressWarnings(smape(ets1.pred$mean,GOOGL.test))
+ets1.smape
+```
+
+
+```{r }
+#Performance plot for Arch
+par(mfrow = c(1,1))
+plot(as.Date(GOOGL.test.date), GOOGL.test, type = "l", pch=20, col="black",
+     xlab="Date",ylab="Price", ylim=c(1300,1500),
+     main="ETS predictions")
+
+points(as.Date(GOOGL.test.date),ets1.pred$mean, pch=20, col="red")
+
+legend("topleft", legend=c("Actual", "ETS"),
+       col=c("black", "red"), lty=1:2, cex=0.8)
+```
+
+
+
+
+
+
+
+# Prophet
+
+```{r }
+df <- GOOGL[GOOGL$date>='2015-01-02' & GOOGL$date<='2019-12-31',c('date','GOOGL.Close')]
+names(df) <- c('ds','y')
+# df$cap <- 8.5
+m <- prophet(df,daily.seasonality=TRUE)
+```
+
+
+
+```{r }
+future <- make_future_dataframe(m, periods = h,freq='D')
+# future$cap <- 8.5
+fcst <- predict(m, future)
+plot(m, fcst)
+```
+
+```{r }
+prophet.pred <- fcst$yhat
+n <- length(prophet.pred)
+prophet.pred=prophet.pred[(n-h+1):n]
+```
+
+```{r }
+# Evaluation
+prophet1.smape <- suppressWarnings(smape(prophet.pred,GOOGL.test))
+prophet1.smape
+```
+
+
+```{r }
+#Performance plot for Arch
+par(mfrow = c(1,1))
+plot(as.Date(GOOGL.test.date), GOOGL.test, type = "l", pch=20, col="black",
+     xlab="Date",ylab="Price", ylim=c(1300,1500),
+     main="Prophet predictions")
+
+points(as.Date(GOOGL.test.date),prophet.pred, pch=20, col="red")
+
+legend("topleft", legend=c("Actual", "Prophet"),
+       col=c("black", "red"), lty=1:2, cex=0.8)
+```
+
+Forecast by prophet isn’t ideal to use this forecast in trading
+
+
+
+
+
+
+
+# ARIMA
+
+```{r }
+arima1.pred <- forecast(arima1,h)
+arima1.LogPred <- arima1.pred$mean
+arima1.pred <- Log2Price(arima1.LogPred,GOOGL.train.LastPrice)
+arima1.pred
+```
+
+
+```{r }
+# Evaluations
+arima1.smape <- suppressWarnings(smape(arima1.pred,GOOGL.test))
+arima1.smape
+
+smape(arima1.LogPred,GOOGL.test.lr)
+```
+
+
+```{r }
+#Performance plot for Arima
+par(mfrow = c(1,1))
+plot(as.Date(GOOGL.test.date), GOOGL.test, type = "l", pch=20, col="black",
+     xlab="Date",ylab="Price", ylim=c(1300,1500),
+     main="Arima predictions")
+
+points(as.Date(GOOGL.test.date),arima1.pred, pch=20, col="red")
+
+legend("topleft", legend=c("Actual", "Arima"),
+       col=c("black", "red"), lty=1:2, cex=0.8)
+```
+
+```{r }
+garch2.logPred <- predict(garch2, n.ahead = h, trace = FALSE, 
+        plot=TRUE, nx=NULL, crit_val=NULL, conf=NULL)
+# garch2.logPred
+```
+
+
+
+```{r }
+c('Arch',arch1.smape)
+c('Garch',garch1.smape)
+c('Prophet',prophet1.smape)
+c('Arima',arima1.smape)
+```
+
+
+
+```{r }
+
+```

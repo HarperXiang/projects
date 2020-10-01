@@ -1,0 +1,1023 @@
+---
+title: "TSGP_SP500"
+output: html_document
+---
+
+### ########################################
+# 1) Data Loading & Combination
+
+# 2) Data Processing
+# 2.1) Differencing
+# 2.2) Train-Test Split
+
+# 3) EDA
+# 3.1) Stationarity Test
+# 3.2) Seasonality check
+# 3.3) Cross-Correlation check
+# 3.4) Linearity check
+
+# 4) Linear Model
+# 4.1) Original data
+# 4.2) LogReturn data
+# 4.3) Model Evaluation
+
+# 5) ARIMA Model
+# 5.1) Original data
+# 5.2) LogReturn data
+# 5.3) Model Evaluation
+
+# 6) Regression with ARIMA Errors
+# 6.1) Original data
+# 6.2) LogReturn data
+# 6.3) Model Evaluation
+
+# 7) Transfer Function Model
+# 7.1) Original data
+# 7.2) LogReturn data
+# 7.3) Model Evaluation
+
+# 8) ARFIMA Model
+# 8.1) Original data
+# 8.2) LogReturn data
+# 8.3) Model Evaluation
+
+# 9) Bootstrapp with ARIMA
+# 9.1) Estimating an AR model's parameters with the LogReturn data
+# 9.2) Resampling with the AR model's parameters and Bootstrapped Residuals
+# 9.3) Bagging & Forecasting
+
+### ########################################
+
+
+```{r}
+suppressMessages(library(tseries))
+suppressMessages(library(forecast))
+```
+
+
+### ########################################
+# 1) Data Loading & Combination
+```{r}
+switch.part1 <- FALSE
+```
+
+```{r}
+if (switch.part1) {
+  suppressMessages(library(quantmod))
+}
+```
+
+```{r}
+datapath <- "./data/"
+stock.list <- c('GOOGL', 'NWSA', 'DIS', 'NFLX', 'T')
+datafile.stock <- "./data/stocks_full.csv"
+date.from <- "2015-01-01"
+date.to   <- "2020-01-31"
+num.stock <- length(stock.list)
+```
+
+```{r}
+if (switch.part1) {
+  data.list <- list()
+  for (i in seq(num.stock)) {
+    getSymbols(stock.list[i], from=date.from, to=date.to)
+    data.list[[i]] <- eval(parse(text=stock.list[i]))
+    print(dim(data.list[[i]]))
+  }
+}
+```
+
+```{r}
+if (switch.part1) {
+  for (i in seq(num.stock)) {
+    chartSeries(eval(parse(text=stock.list[i])))
+  }
+}
+```
+
+```{r}
+if (switch.part1) {
+  head(data.list[[1]], 2)
+  tail(data.list[[1]], 2)
+}
+```
+
+```{r}
+if (switch.part1) {
+  # Unify the length
+  len.date <- c()
+  for (i in seq(num.stock)) {
+    len.date <- c(len.date, dim(data.list[[i]])[1])
+  }
+  (min.len.date <- min(len.date))
+}
+```
+
+```{r}
+if (switch.part1) {
+  # Combination of all stocks' CLOSE prices
+  df.stocks <- c()
+  for (i in seq(num.stock)) {
+    close.price <- data.list[[i]][ ,4]
+    len.d <- length(close.price)
+    if (len.d==min.len.date) {
+      ts.d <- as.double(close.price)
+      idx.date <- as.Date(rownames(as.matrix(data.list[[i]])))
+    } else {
+      ts.d <- suppressWarnings(as.double(close.price[(len.d - min.len.date + 1) : len.d]))
+    }
+    df.stocks <- suppressWarnings(cbind(df.stocks, ts.d))
+  }
+  dim(df.stocks)
+}
+```
+
+```{r}
+if (switch.part1) {
+  df.stocks <- as.data.frame(df.stocks, row.names=idx.date)
+  names(df.stocks) <- stock.list
+  head(df.stocks, 2)
+}
+```
+
+```{r}
+if (switch.part1) {
+  tail(df.stocks, 2)
+}
+```
+
+```{r}
+if (switch.part1) {
+  # Save data
+  write.csv(df.stocks, file=datafile.stock)
+}
+```
+
+
+### ########################################
+# 2) Data Processing
+```{r}
+# Data loading
+df.stocks <- read.csv(datafile.stock, header=TRUE)
+row.names(df.stocks) <- as.Date(df.stocks$X)
+df.stocks <- df.stocks[, -1]
+dim(df.stocks)
+```
+
+```{r}
+# Initialization
+idx.date <- as.Date(row.names(df.stocks))
+col.stocks <- c("gold", "green", "hotpink", "red", "cornflowerblue")
+
+ts.stocks <- ts(df.stocks)
+ts.plot(ts.stocks, col=col.stocks, main="Original TS")
+legend("topleft", legend=stock.list, text.col=col.stocks, cex = 0.8, bty="n")
+```
+
+# 2.1) Normalization
+```{r}
+# FUNCTION
+# Normalize a vector
+# INPUT
+# vec : vector
+# OUTPUT
+# vector, normalized
+vec.normalization <- function(vec) {
+#  vec.mean <- mean(vec)
+#  vec.std  <- sd(vec)
+#  return ((vec-vec.mean)/vec.std)
+
+#  lambda <- BoxCox.lambda(vec)
+#  return (BoxCox(vec, lambda=lambda))
+  
+  r <- diff(vec, lag=1) / vec[-length(vec)]
+  return (log(1+r))
+}
+
+# FUNCTION
+# De-normalize a vector
+# INPUT
+# vec.lgrt : vector, normalized
+# OUTPUT
+# vector, de-normalized
+vec.denormalize <- function(vec.lgrt, xi) {
+  vec <- c(xi)
+  for (i in seq(length(vec.lgrt))) {
+    vec[i+1] <- vec[i] * exp(vec.lgrt[i])
+  }
+  return (vec)
+}
+```
+
+```{r}
+ts.stocks.lgrt <- ts.stocks[-1, ]
+for (i in seq(num.stock)) {
+  ts.stocks.lgrt[ ,i] <- vec.normalization(ts.stocks[ ,i])
+}
+ts.plot(ts.stocks.lgrt, col=col.stocks, main="Log-return TS")
+legend("topleft", legend=stock.list, text.col=col.stocks, cex = 0.6, bty="n")
+```
+
+# 2.2) Train-Test Split
+```{r}
+tail(idx.date, 20)
+```
+
+```{r}
+len.full  <- dim(ts.stocks)[1]
+len.test  <- 19  # 2020-01-03
+len.train <- len.full-len.test
+c(len.full, len.train, len.test)
+```
+
+```{r}
+# Original dataset split
+
+# Target TS: "GOOGL"
+X.orig <- ts.stocks[ ,-1]
+y.orig <- ts.stocks[ ,1]
+
+X.orig.train <- X.orig[1:len.train, ]
+X.orig.test  <- X.orig[(len.train+1):len.full, ]
+y.orig.train <- y.orig[1:len.train]
+y.orig.test  <- y.orig[(len.train+1):len.full]
+
+X.names <- colnames(as.matrix(X.orig.train))
+X.orig.train <- data.frame(X.orig.train, row.names=idx.date[1:len.train])
+names(X.orig.train) <- X.names
+X.orig.test  <- data.frame(X.orig.test,  row.names=idx.date[(len.train+1):len.full])
+names(X.orig.test)  <- X.names
+
+c(dim(X.orig.train), dim(X.orig.test), length(y.orig.train), length(y.orig.test))
+```
+
+```{r}
+# Normalized & LogReturn dataset split
+
+# This is for VARMA
+ts.stocks.lgrt.train <- ts.stocks.lgrt[1:(len.train-1), ]
+ts.stocks.lgrt.test  <- ts.stocks.lgrt[(len.train):(len.full-1), ]
+
+# Target TS: "GOOGL"
+X.lgrt <- ts.stocks.lgrt[ ,-1]
+y.lgrt <- ts.stocks.lgrt[ ,1]
+
+X.lgrt.train <- X.lgrt[1:(len.train-1), ]
+X.lgrt.test  <- X.lgrt[(len.train):(len.full-1), ]
+y.lgrt.train <- y.lgrt[1:(len.train-1)]
+y.lgrt.test  <- y.lgrt[(len.train):(len.full-1)]
+
+X.lgrt.train <- data.frame(X.lgrt.train)
+names(X.lgrt.train) <- X.names
+X.lgrt.test  <- data.frame(X.lgrt.test)
+names(X.lgrt.test)  <- X.names
+
+c(dim(X.lgrt.train), dim(X.lgrt.test), length(y.lgrt.train), length(y.lgrt.test))
+```
+
+
+### ########################################
+# 3) EDA
+# 3.1) Stationarity Test
+```{r}
+# FUNCTION
+# Basic stationarity tests
+# INPUT
+# vec : vector, TS to be tested
+# OUTPUT
+# c(p.adf, p.kpss, p.Box) : p values of adf.test, kpss.test, Box.test
+
+stationarity.test <- function(ts.t) {
+  rt <- c()
+  rt["p.adf"]  <- suppressWarnings(adf.test(ts.t))$p.value
+  rt["p.kpss"] <- suppressWarnings(kpss.test(ts.t))$p.value
+  rt["p.Box"]  <- suppressWarnings(Box.test(ts.t, type="Ljung-Box"))$p.value
+  return (rt)
+}
+```
+
+```{r}
+# Stationarity of Original TS
+for (i in seq(num.stock)) {
+  print(stationarity.test(ts.stocks[ ,i]))
+}
+```
+
+```{r}
+tsdisplay(y.orig.train)
+```
+
+```{r}
+# Stationarity of Normalized & LogReturn TS
+for (i in seq(num.stock)) {
+  print(stationarity.test(ts.stocks.lgrt[ ,i]))
+}
+```
+
+```{r}
+tsdisplay(y.lgrt.train)
+```
+
+# 3.2) Seasonality check
+```{r}
+suppressMessages(library(TSA))
+```
+
+```{r}
+ss.stocks <- c()
+par(mfrow=c(num.stock/2+1,2))
+for (i in seq(num.stock)) {
+  fq <- TSA::periodogram(ts.stocks[ ,i])
+  ss.stocks[i] <- 1 / fq$freq[which.max(fq$spec)]
+}
+```
+
+```{r}
+print(ss.stocks)
+print(dim(ts.stocks)[1])
+```
+
+# 3.3) Cross-Correlation check
+```{r}
+# Original TS
+stats::acf(ts.stocks)
+```
+
+```{r}
+# LogReturn TS
+stats::acf(ts.stocks.lgrt)
+```
+
+# 3.4) Linearity check
+```{r}
+# Original TS
+par(mfrow=c(num.stock/2,2))
+for (i in seq(num.stock-1)) {
+  plot(ts.stocks[ ,i+1], ts.stocks[ ,1], xlab=stock.list[i+1], ylab=stock.list[1])
+}
+```
+
+```{r}
+# LogReturn TS
+par(mfrow=c(num.stock/2,2))
+for (i in seq(num.stock-1)) {
+  plot(X.lgrt.train[ ,i], y.lgrt.train, xlab=stock.list[i+1], ylab=stock.list[1],
+       xlim=c(-.05,.05), ylim=c(-.05,.05))
+}
+```
+
+
+### ########################################
+# 4) Linear Model
+# 4.1) Original data
+```{r}
+# Simple Linear Model with Original data
+lm.orig <- lm(y.orig.train ~ ., data=X.orig.train)
+summary(lm.orig)
+```
+
+```{r}
+# Residual diagnosis
+checkresiduals(lm.orig)
+```
+
+```{r}
+stationarity.test(lm.orig$residuals)
+```
+
+```{r}
+col.act.pred = c("blue", "red")
+txt.act.pred = c("Actual", "Prediction")
+
+# Forecasting
+lm.orig.fc <- predict(lm.orig, newdata=X.orig.test)
+
+ts.plot(cbind(y.orig.test, lm.orig.fc), 
+        col=col.act.pred, main="Forecast with lm(Original)")
+legend("topleft", legend=txt.act.pred, text.col=col.act.pred, cex = 0.6, bty="n")
+```
+
+# 4.2) LogReturn data
+```{r}
+# Simple Linear Model with LogReturn data
+lm.lgrt <- lm(y.lgrt.train ~ ., data=X.lgrt.train)
+summary(lm.lgrt)
+```
+
+```{r}
+# Residual diagnosis
+checkresiduals(lm.lgrt)
+```
+
+```{r}
+stationarity.test(lm.lgrt$residuals)
+```
+
+```{r}
+# Forecasting
+lm.lgrt.fc <- predict(lm.lgrt, newdata=X.lgrt.test)
+# Reverse Differencing
+lm.lgrt.fc.lgrtinv <- vec.denormalize(lm.lgrt.fc, 
+                                      xi=tail(y.orig.train, 1))[-1]
+
+ts.plot(cbind(y.orig.test, lm.lgrt.fc.lgrtinv), 
+        col=col.act.pred, main="Forecast with lm(LogReturn)")
+legend("topleft", legend=txt.act.pred, text.col=col.act.pred, cex = 0.6, bty="n")
+```
+
+# 4.3) Model Evaluation
+```{r}
+# Multicollinearity
+suppressMessages(library(car))
+vif(lm.orig)
+vif(lm.lgrt)
+```
+
+```{r}
+# Function
+# sMAPE (Symmetric Mean Absolute Percentage Error) computing
+# Input
+# y.act  : vector, actual value
+# y.pred : vector, predicted value
+# Output
+# sMAPE result
+
+sMAPE.com <- function(y.act, y.pred) {
+  smape <- 2 * mean(abs(y.act - y.pred) / (abs(y.act) + abs(y.pred)))
+  return (smape)
+}
+
+sMAPEs <- data.frame("Original"=0, "LogReturn"=0)
+sMAPEs <- sMAPEs[-1, ]
+```
+
+```{r}
+# Function
+# RMSE (Root Mean Squared Error) computing
+# Input
+# y.act  : vector, actual value
+# y.pred : vector, predicted value
+# Output
+# RMSE result
+
+RMSE.com <- function(y.act, y.pred) {
+  rmse <- (mean((y.act - y.pred)**2))**0.5
+  return (rmse)
+}
+
+RMSEs <- data.frame("Original"=0, "LogReturn"=0)
+RMSEs <- RMSEs[-1, ]
+```
+
+```{r}
+sMAPEs["LinearRegression",1] <- sMAPE.com(y.orig.test, lm.orig.fc)
+sMAPEs["LinearRegression",2] <- sMAPE.com(y.orig.test, lm.lgrt.fc.lgrtinv)
+sMAPEs
+```
+
+```{r}
+RMSEs["LinearRegression",1] <- RMSE.com(y.orig.test, lm.orig.fc)
+RMSEs["LinearRegression",2] <- RMSE.com(y.orig.test, lm.lgrt.fc.lgrtinv)
+RMSEs
+```
+
+
+### ########################################
+# 5) ARIMA Model
+# 5.1) Original data
+```{r}
+#am.orig <- auto.arima(y.orig.train, lambda=BoxCox.lambda(y.orig.train))
+am.orig <- Arima(y.orig.train, order=c(4,1,4), lambda=BoxCox.lambda(y.orig.train))
+summary(am.orig)
+```
+
+```{r}
+# Residual diagnosis
+checkresiduals(am.orig)
+```
+
+```{r}
+stationarity.test(residuals(am.orig))
+```
+
+```{r}
+# Forecasting
+am.orig.fc <- forecast(am.orig, h=len.test)
+
+ts.plot(cbind(y.orig.test, am.orig.fc$mean), 
+        col=col.act.pred, main="Forecast with auto.arima(Original)")
+legend("topleft", legend=txt.act.pred, text.col=col.act.pred, cex = 0.6, bty="n")
+```
+
+# 5.2) LogReturn data
+```{r}
+#am.lgrt <- auto.arima(y.lgrt.train)
+am.lgrt <- Arima(y.lgrt.train, order=c(4,0,4))
+summary(am.lgrt)
+```
+
+```{r}
+# Residual diagnosis
+checkresiduals(am.lgrt)
+```
+
+```{r}
+print(stationarity.test(residuals(am.lgrt)))
+```
+
+```{r}
+# Forecasting
+am.lgrt.fc <- forecast(am.lgrt, h=len.test)
+# Reverse Differencing
+am.lgrt.fc.lgrtinv <- vec.denormalize(am.lgrt.fc$mean, 
+                                      xi=tail(y.orig.train, 1))[-1]
+
+ts.plot(cbind(y.orig.test, am.lgrt.fc.lgrtinv), 
+        col=col.act.pred, main="Forecast with auto.arima(LogReturn)")
+legend("topleft", legend=txt.act.pred, text.col=col.act.pred, cex = 0.6, bty="n")
+```
+
+# 5.3) Model Evaluation
+```{r}
+sMAPEs["ARIMA",1] <- sMAPE.com(y.orig.test, am.orig.fc$mean)
+sMAPEs["ARIMA",2] <- sMAPE.com(y.orig.test, am.lgrt.fc.lgrtinv)
+sMAPEs
+```
+
+```{r}
+RMSEs["ARIMA",1] <- RMSE.com(y.orig.test, am.orig.fc$mean)
+RMSEs["ARIMA",2] <- RMSE.com(y.orig.test, am.lgrt.fc.lgrtinv)
+RMSEs
+```
+
+
+### ########################################
+# 6) Regression with ARIMA Errors
+# 6.1) Original data
+```{r}
+# Model fitting
+amx.orig <- auto.arima(y.orig.train, xreg=as.matrix(X.orig.train))
+summary(amx.orig)
+```
+
+```{r}
+# Residual diagnosis
+checkresiduals(amx.orig)
+```
+
+```{r}
+stationarity.test(residuals(amx.orig))
+```
+
+```{r}
+# Forecasting
+amx.orig.fc <- forecast(amx.orig, xreg=as.matrix(X.orig.test))
+
+ts.plot(cbind(y.orig.test, amx.orig.fc$mean), 
+        col=col.act.pred, main="Forecast with ARIMA Error Regression(Original)")
+legend("topleft", legend=txt.act.pred, text.col=col.act.pred, cex = 0.6, bty="n")
+```
+
+# 6.3) LogReturn data
+```{r}
+# Model fitting
+amx.lgrt <- auto.arima(y.lgrt.train, xreg=as.matrix(X.lgrt.train))
+summary(amx.lgrt)
+```
+
+```{r}
+# Residual diagnosis
+checkresiduals(amx.lgrt)
+```
+
+```{r}
+stationarity.test(residuals(amx.lgrt))
+```
+
+```{r}
+# Forecasting
+amx.lgrt.fc <- forecast(amx.lgrt, xreg=as.matrix(X.lgrt.test))
+# Reverse Differencing
+amx.lgrt.fc.lgrtinv <- vec.denormalize(amx.lgrt.fc$mean,
+                                       xi=tail(y.orig.train, 1))[-1]
+
+ts.plot(cbind(y.orig.test, amx.lgrt.fc.lgrtinv), 
+        col=col.act.pred, main="Forecast with ARIMA Error Regression(LogReturn)")
+legend("topleft", legend=txt.act.pred, text.col=col.act.pred, cex = 0.6, bty="n")
+```
+
+# 6.3) Model Evaluation
+```{r}
+sMAPEs["ARIMAerrRegression",1] <- sMAPE.com(y.orig.test, amx.orig.fc$mean)
+sMAPEs["ARIMAerrRegression",2] <- sMAPE.com(y.orig.test, amx.lgrt.fc.lgrtinv)
+sMAPEs
+```
+
+```{r}
+RMSEs["ARIMAerrRegression",1] <- RMSE.com(y.orig.test, amx.orig.fc$mean)
+RMSEs["ARIMAerrRegression",2] <- RMSE.com(y.orig.test, amx.lgrt.fc.lgrtinv)
+RMSEs
+```
+
+
+### ########################################
+# 7) Transfer Function Model
+# 7.1) Original data
+```{r}
+# Fit Transfer Function model using arimax() with Train dataset
+# A Transfer Function Model with order(p=0, q=1) is equivalent to a simple regression
+tf.orig <- TSA::arimax(y.orig.train,
+                       order=c(am.orig$arma[1], am.orig$arma[6], am.orig$arma[2]), 
+                       xtransf=as.matrix(X.orig.train),
+                       transfer=list(c(1,0),c(1,0),c(1,0),c(1,0)))
+summary(tf.orig)
+```
+
+```{r}
+# FUNCTION
+# Transfer Function of a Variable
+# INPUT
+# vec.var : vector, variable to be transferred
+# phi     : AR coefficients
+# theta   : MA coefficients
+# OUTPUT
+# tf.var  : vector, variable transferred
+
+tf.variable <- function(vec.var, phi, theta) {
+  tf.var <- (vec.var*theta) / stats::filter(vec.var, filter=c(1,-phi), side=1)
+  return (tf.var)
+} 
+```
+
+```{r}
+# Make Transfer Functions with the fitted coefficients
+p   <- tf.orig$arma[1]
+q   <- tf.orig$arma[2]
+p.s <- tf.orig$arma[3]
+q.s <- tf.orig$arma[4]
+offset.coef <- p + q + p.s + q.s
+
+# Extract Transfer Functions for each covariate with Train+Test length
+xreg <- as.matrix(X.orig)
+
+# "NWSA"
+idx.beta <- 0
+phi   <- tf.orig$coef[offset.coef + idx.beta*2 + 1]
+theta <- tf.orig$coef[offset.coef + idx.beta*2 + 2]
+# tf.1 <- stats::filter(xreg[, 1], filter=phi, method='recursive', side=1) * theta
+tf.1 <- tf.variable(xreg[, 1], phi, theta)
+# "DIS"
+idx.beta <- 1
+phi   <- tf.orig$coef[offset.coef + idx.beta*2 + 1]
+theta <- tf.orig$coef[offset.coef + idx.beta*2 + 2]
+tf.2 <- tf.variable(xreg[, 2], phi, theta)
+# "NFLX"
+idx.beta <- 2
+phi   <- tf.orig$coef[offset.coef + idx.beta*2 + 1]
+theta <- tf.orig$coef[offset.coef + idx.beta*2 + 2]
+tf.3 <- tf.variable(xreg[, 3], phi, theta)
+# "T"
+idx.beta <- 3
+phi   <- tf.orig$coef[offset.coef + idx.beta*2 + 1]
+theta <- tf.orig$coef[offset.coef + idx.beta*2 + 2]
+tf.4 <- tf.variable(xreg[, 4], phi, theta)
+
+xreg.tf.orig <- cbind(NWSA = tf.1,
+                      DIS  = tf.2,
+                      NFLX = tf.3,
+                      T    = tf.4)
+dim(xreg.tf.orig)
+```
+
+```{r}
+# Fit ARIMA model with the Transfer Functions with Train dataset
+am.tf.orig <- Arima(y.orig.train[-1], 
+                    order=c(am.orig$arma[1], am.orig$arma[6], am.orig$arma[2]),
+                    xreg=xreg.tf.orig[2:len.train, ])
+am.tf.orig
+```
+
+```{r}
+# Residual dignosis
+checkresiduals(am.tf.orig)
+```
+
+```{r}
+stationarity.test(residuals(am.tf.orig))
+```
+
+```{r}
+# Forecasting
+am.tf.orig.fc <- predict(am.tf.orig, n.ahead=len.test, 
+                         newxreg=xreg.tf.orig[(len.train+1):(len.full), ])
+
+ts.plot(cbind(y.orig.test, am.tf.orig.fc$pred), 
+        col=col.act.pred, main="Forecast with Transfer Function Model(Original)")
+legend("topleft", legend=txt.act.pred, text.col=col.act.pred, cex = 0.6, bty="n")
+```
+
+# 7.2) LogReturn data
+```{r}
+# Fit Transfer Function model using arimax() with Train dataset
+tf.lgrt <- TSA::arimax(y.lgrt.train,
+                       order=c(am.lgrt$arma[1], am.lgrt$arma[6], am.lgrt$arma[2]),
+                       xtransf=as.matrix(X.lgrt.train),
+                       transfer=list(c(1,0),c(1,0),c(1,0),c(1,0)))
+summary(tf.lgrt)
+```
+
+```{r}
+# Make Transfer Functions with the fitted coefficients
+p   <- tf.lgrt$arma[1]
+q   <- tf.lgrt$arma[2]
+p.s <- tf.lgrt$arma[3]
+q.s <- tf.lgrt$arma[4]
+offset.coef <- p + q + p.s + q.s + 1 #intercept
+
+# Extract Transfer Functions for each covariate with Train+Test length
+xreg <- as.matrix(X.lgrt)
+
+# "NWSA"
+idx.beta <- 0
+phi   <- tf.lgrt$coef[offset.coef + idx.beta*2 + 1]
+theta <- tf.lgrt$coef[offset.coef + idx.beta*2 + 2]
+tf.1 <- tf.variable(xreg[, 1], phi, theta)
+# "DIS"
+idx.beta <- 1
+phi   <- tf.lgrt$coef[offset.coef + idx.beta*2 + 1]
+theta <- tf.lgrt$coef[offset.coef + idx.beta*2 + 2]
+tf.2 <- tf.variable(xreg[, 2], phi, theta)
+# "NFLX"
+idx.beta <- 2
+phi   <- tf.lgrt$coef[offset.coef + idx.beta*2 + 1]
+theta <- tf.lgrt$coef[offset.coef + idx.beta*2 + 2]
+tf.3 <- tf.variable(xreg[, 3], phi, theta)
+# "T"
+idx.beta <- 3
+phi   <- tf.lgrt$coef[offset.coef + idx.beta*2 + 1]
+theta <- tf.lgrt$coef[offset.coef + idx.beta*2 + 2]
+tf.4 <- tf.variable(xreg[, 4], phi, theta)
+
+xreg.tf.lgrt <- cbind(NWSA = tf.1,
+                      DIS  = tf.2,
+                      NFLX = tf.3,
+                      T    = tf.4)
+dim(xreg.tf.lgrt)
+```
+
+```{r}
+# Fit ARIMA model with the Transfer Functions with Train dataset
+am.tf.lgrt <- Arima(y.lgrt.train[-1], 
+                    order=c(am.lgrt$arma[1], am.lgrt$arma[6], am.lgrt$arma[2]),
+                    xreg=xreg.tf.lgrt[2:(len.train-1), ])
+am.tf.lgrt
+```
+
+```{r}
+# Residual dignosis
+checkresiduals(am.tf.lgrt)
+```
+
+```{r}
+am.tf.lgrt.res <- residuals(am.tf.lgrt)
+stationarity.test(am.tf.lgrt.res[!is.na(am.tf.lgrt.res)])
+```
+
+```{r}
+# Forecasting
+am.tf.lgrt.fc <- predict(am.tf.lgrt, n.ahead=len.test, 
+                         newxreg=xreg.tf.lgrt[(len.train):(len.full-1), ])
+# Reverse Differencing
+am.tf.lgrt.fc.lgrtinv <- vec.denormalize(am.tf.lgrt.fc$pred, 
+                                         xi=tail(y.orig.train, 1))[-1]
+
+ts.plot(cbind(y.orig.test, am.tf.lgrt.fc.lgrtinv), 
+        col=col.act.pred, main="Forecast with Transfer Function Model(LogReturn)")
+legend("topleft", legend=txt.act.pred, text.col=col.act.pred, cex = 0.6, bty="n")
+```
+
+# 7.3) Model Evaluation
+```{r}
+sMAPEs["TransferFunction",1] <- sMAPE.com(y.orig.test, am.tf.orig.fc$pred)
+sMAPEs["TransferFunction",2] <- sMAPE.com(y.orig.test, am.tf.lgrt.fc.lgrtinv)
+sMAPEs
+```
+
+```{r}
+RMSEs["TransferFunction",1] <- RMSE.com(y.orig.test, am.tf.orig.fc$pred)
+RMSEs["TransferFunction",2] <- RMSE.com(y.orig.test, am.tf.lgrt.fc.lgrtinv)
+RMSEs
+```
+
+
+### ########################################
+# 8) ARFIMA Model
+# 8.1) Original data
+```{r}
+afm.orig <- forecast::arfima(y.orig.train, lambda=BoxCox.lambda(y.orig.train))
+afm.orig
+```
+
+```{r}
+# Residual diagnosis
+checkresiduals(afm.orig)
+```
+
+```{r}
+stationarity.test(residuals(afm.orig))
+```
+
+```{r}
+# Forecasting
+afm.orig.fc <- forecast(afm.orig, h=len.test)
+
+ts.plot(cbind(y.orig.test, afm.orig.fc$mean), 
+        col=col.act.pred, main="Forecast with ARFIMA(Original)")
+legend("topleft", legend=txt.act.pred, text.col=col.act.pred, cex = 0.6, bty="n")
+```
+
+# 8.2) LogReturn data
+```{r}
+afm.lgrt <- forecast::arfima(y.lgrt.train)
+afm.lgrt
+```
+
+```{r}
+# Residual diagnosis
+checkresiduals(afm.lgrt)
+```
+
+```{r}
+stationarity.test(residuals(afm.lgrt))
+```
+
+```{r}
+# Forecasting
+afm.lgrt.fc <- forecast(afm.lgrt, h=len.test)
+# Reverse Differencing
+afm.lgrt.fc.lgrtinv <- vec.denormalize(afm.lgrt.fc$mean,
+                                       xi=tail(y.orig.train, 1))[-1]
+
+ts.plot(cbind(y.orig.test, afm.lgrt.fc.lgrtinv), 
+        col=col.act.pred, main="Forecast with ARFIMA(LogReturn)")
+legend("topleft", legend=txt.act.pred, text.col=col.act.pred, cex = 0.6, bty="n")
+```
+
+# 8.3) Model Evaluation
+```{r}
+sMAPEs["ARFIMA",1] <- sMAPE.com(y.orig.test, afm.orig.fc$mean)
+sMAPEs["ARFIMA",2] <- sMAPE.com(y.orig.test, afm.lgrt.fc.lgrtinv)
+sMAPEs
+```
+
+```{r}
+RMSEs["ARFIMA",1] <- RMSE.com(y.orig.test, afm.orig.fc$mean)
+RMSEs["ARFIMA",2] <- RMSE.com(y.orig.test, afm.lgrt.fc.lgrtinv)
+RMSEs
+```
+
+
+### ########################################
+# 9) Bootstrapp with ARIMA
+```{r}
+suppressMessages(library(boot))
+```
+
+# 9.1) Estimating an AR model's parameters with the LogReturn data
+```{r}
+# Choose LogReturn data or Original data
+switch.lgrt <- TRUE
+
+if (switch.lgrt) {
+  ts.baseline <- y.lgrt.train
+} else {
+  ts.baseline <- y.orig.train
+}
+```
+
+```{r}
+# Fitting an AR model as the baseline model
+ts.ar <- ar(ts.baseline)
+ts.ar$order
+```
+```{r}
+# Preparing the AR model's parameters
+ar.para <- list(order=c(ts.ar$order, 0, 0), ar=ts.ar$ar)
+# Preparing the AR model's residuals
+ar.res <- ts.ar$resid[!is.na(ts.ar$resid)]
+ar.res <- ar.res - mean(ar.res)
+c(length(ts.baseline), length(ts.ar$resid), length(ar.res))
+```
+
+# 9.2) Resampling with the AR model's parameters and Bootstrapped Residuals
+```{r}
+# Function to generate statistics
+stat.func <- function(tsb) {
+  #ar.fit <- ar(tsb, order.max=25)
+  #c(ar.fit$order, mean(tsb), tsb)
+  c(tsb)
+}
+
+# Function to Simulate TS with AR model's parameters and Bootstrapped Residuals
+ts.bt.sim <- function(res, n.sim, ran.args) {
+  # Bootstrapping the Residuals
+  rg1 <- function(n, res) sample(res, n, replace=TRUE)
+  ts.orig <- ran.args$ts
+  ts.mod  <- ran.args$model
+  # random generation of replicate series using arima.sim 
+  mean(ts.orig) + ts(arima.sim(model=ts.mod, n=n.sim,
+                               rand.gen=rg1, res=as.vector(res)))
+}
+```
+
+```{r}
+# Model based Bootstrap
+num.bts <- 99
+bts.arima <- tsboot(ar.res, statistic=stat.func,      # "statistic=" applys even when "orig.t=FALSE"
+                    R=num.bts, n.sim=length(ts.baseline),
+                    sim="model", orig.t=FALSE,        
+                    ran.gen=ts.bt.sim,                # "ran.gen=" applies too
+                    ran.args= list(ts=ts.baseline, model=ar.para))
+names(bts.arima)
+```
+
+```{r}
+# The first and second values of each Bootstrapped Sample
+# are the first and second values outputed from stat.func()
+dim(bts.arima$t)
+```
+
+```{r}
+# Bootstrapped Samples [1:3] v. Original TS
+bt.samples <- list()
+cls <- c("red", "blue", "yellow", "black")
+for (i in c(1:3)) {
+  smp <- ts(bts.arima$t[i, ])
+  bt.samples[[i]] <- smp
+}
+bt.samples[[i+1]] <- ts.baseline
+bt.samples <- as.data.frame(bt.samples)
+ts.plot(bt.samples, col=cls)
+```
+
+# 9.3) Bagging & Forecasting
+```{r}
+bts.arima.fc <- c()
+lgrtinv.start <- tail(y.orig.train, 1)
+for (i in seq(num.bts)) {
+  #fc <- forecast(auto.arima(bts.arima$t[i, ]), h=len.test)
+  fc <- suppressWarnings(forecast(Arima(bts.arima$t[i, ]), 
+                                  order=c(4,0,4), h=len.test))
+  if (switch.lgrt) {
+    fc.lgrtinv <- vec.denormalize(fc$mean, xi=lgrtinv.start)[-1]
+  } else {
+    fc.lgrtinv <- fc$mean
+  }
+  bts.arima.fc <- cbind(bts.arima.fc, fc.lgrtinv)
+}
+dim(bts.arima.fc)
+```
+
+```{r}
+ts.plot(data.frame(bts.arima.fc))
+```
+
+```{r}
+am.bagging.mean <- c()
+for (j in seq(len.test)) {
+  fc.mean <- mean(bts.arima.fc[j, ])
+  am.bagging.mean <- c(am.bagging.mean, fc.mean)
+}
+length(am.bagging.mean)
+```
+
+```{r}
+ts.plot(cbind(y.orig.test, am.bagging.mean), 
+        col=col.act.pred, main="Forecast with ARIMA Bootstrap")
+legend("topleft", legend=txt.act.pred, text.col=col.act.pred, cex = 0.6, bty="n")
+```
+
+```{r}
+if (switch.lgrt) {
+  sMAPEs["ARIMA Bootstrap",2] <- sMAPE.com(y.orig.test, am.bagging.mean)
+} else {
+  sMAPEs["ARIMA Bootstrap",1] <- sMAPE.com(y.orig.test, am.bagging.mean)
+}
+sMAPEs
+```
+
+```{r}
+if (switch.lgrt) {
+  RMSEs["ARIMA Bootstrap",2] <- RMSE.com(y.orig.test, am.bagging.mean)
+} else {
+  RMSEs["ARIMA Bootstrap",1] <- RMSE.com(y.orig.test, am.bagging.mean)
+}
+RMSEs
+```
+
+```{r}
+
+```
+
+
+
